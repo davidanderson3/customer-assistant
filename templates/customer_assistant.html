@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NLM Customer Service Helper</title>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <style>
+        body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f4f4f4;
+}
+
+pre {
+    white-space: pre-wrap; /* Allows the text to wrap */
+    word-wrap: break-word; /* Breaks the word at the end of the line */
+    overflow-wrap: break-word; /* Ensures long words don't overflow */
+    overflow-x: hidden; /* Hides horizontal scrollbar */
+    max-width: 100%; /* Ensures the pre element doesn't overflow its container */
+}
+
+#container {
+    width: 90%;
+    max-width: 1200px; /* Ensures the container doesn't get too wide on large screens */
+    display: flex;
+    flex-wrap: wrap; /* Enables responsive design */
+    justify-content: space-between;
+    margin: 20px;
+}
+
+#inputSection, #outputSection {
+    flex: 1;
+    min-width: 300px; /* Minimum width for smaller screens */
+    padding: 20px;
+    border-radius: 8px;
+    background-color: white;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    margin: 10px;
+}
+
+input[type=text], textarea, select {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    display: inline-block;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* Makes sure padding doesn't affect overall width */
+}
+
+#categories button {
+    padding: 5px 8px;
+    margin: 5px;
+    font-size: 12px;
+    line-height: 1;
+    color: white;
+    background-color: #446dff; /* Red for delete button */
+    border-color: #44fff9;
+    border-radius: 3px;
+}
+
+#categories button.edit-category {
+    background-color: #ffc107; /* Yellow for edit button */
+    border-color: #ffc107;
+}
+
+#categories button:hover {
+    opacity: 0.8;
+}
+
+#feedback-section {
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+    display: none;
+}
+
+/* Spinner Styles */
+#spinner {
+    display: none;
+    margin: 10px auto;
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    border-top: 4px solid blue;
+    width: 40px;
+    height: 40px;
+    animation: spin 2s linear infinite;
+}
+
+#category-manager {
+    display: flex; /* Enables Flexbox */
+    align-items: center; /* Vertical alignment */
+    justify-content: start; /* Align items to the start of the container */
+}
+
+#new-category-name {
+    flex-grow: 1; /* Input field will occupy the maximum width */
+    margin-right: 10px; /* Adds space between the input and the button */
+}
+
+#category-manager button {
+    /* Additional button styling if needed */
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design for Smaller Screens */
+@media screen and (max-width: 768px) {
+    #container {
+        flex-direction: column;
+    }
+}
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="inputSection">
+            <div id="error-message" style="color: red;"></div>
+            <h2>Subject</h2>
+    <input type="text" id="inquiry-subject" placeholder="" />
+    
+            <h2>User Inquiry</h2>
+            <textarea id="code" style="height: 200px;"></textarea><br>
+            <button id="submit-button" onclick="runPythonCode()">Submit to LLM</button>
+            <hr><br><br>
+            <h2>Knowledge Base</h2>
+            <div id="category-manager">
+                <input type="text" id="new-category-name" placeholder="New Topic">
+                <button onclick="addCategory()">Add Topic</button>
+            </div>
+            <div id="categories">
+                <!-- Categories will be dynamically added here -->
+            </div>
+
+                
+                <select id="category-select" onchange="loadKBContent()">
+
+                </select>
+
+
+                <h2>General Instructions</h2>
+                <textarea id="instructions" rows="40" cols="50"></textarea><br>
+                <button id="save-instructions-button" onclick="saveInstructions()">Save Instructions</button>
+        </div>
+        <div id="spinner"></div>
+        <div id="outputSection">
+            <h2>LLM Response</h2>
+            <pre id="output"></pre>
+            <div id="feedback-section">
+                <p id="sentence-count"></p>
+                <h3>Scores</h3>
+                
+                <label for="useful-statements">Correct Answer</label>
+                <select id="correct-answer">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                </select><br/>
+                
+                <label for="missing-useful-statements">Missing Information</label>
+                <select id="missing-useful-statements">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                </select><br/>
+                
+                <!-- New fields added below -->
+                <label for="incorrect-statements">Incorrect Information</label>
+                <select id="incorrect-statements">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                </select><br/>
+                
+                <label for="extraneous-statements">Extraneous Information</label>
+                <select id="extraneous-statements">
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                </select><br/>
+                
+                <label for="notes">Notes:</label>
+                <textarea id="notes" rows="4" cols="50"></textarea><br/>
+                
+                <button onclick="submitFeedback()">Submit Feedback</button>
+            </div>
+            
+
+    </div>
+
+    <script>
+        var currentlyEditingCategory = '';
+            function handleError(error) {
+        var errorMessageElement = document.getElementById('error-message');
+        errorMessageElement.innerText = 'Error: ' + error.responseText;
+        errorMessageElement.scrollIntoView();
+    }
+            $(document).ready(function() {
+                loadKBContent(); 
+        $.ajax({
+            url: '/get_instructions',
+            type: 'GET',
+            success: function(data) {
+                if (data.status === 'success') {
+                    $('#instructions').val(data.instructions);
+                } else {
+                    console.error('Error loading instructions:', data.message);
+                }
+            },
+            error: function(error) {
+                console.error('Error loading instructions:', error.responseText);
+            }
+        });
+    });
+        function saveInstructions() {
+        var instructionsElement = document.getElementById('instructions');
+
+        $.ajax({
+            url: '/save_instructions',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ instructions: instructionsElement.value }),
+            success: function(data) {
+                if (data.status === 'success') {
+                    alert('Instructions saved successfully.');
+                } else {
+                    alert('Error saving instructions.');
+                }
+            },
+            error: function(xhr, status, error) {
+    alert('Error saving instructions: ' + xhr.responseText);
+}
+        });
+    }
+    function saveKBEntry() {
+    var category = document.getElementById('category-select').value;
+    var entry = document.getElementById('kb-entry').value;
+
+    $.ajax({
+        url: '/save_kb_entry',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ category: category, entry: entry }),
+        success: function(response) {
+            alert('Entry saved successfully.');
+            // Don't clear the textarea after saving
+            // document.getElementById('kb-entry').value = '';
+        },
+        error: function() {
+            alert('Error saving entry.');
+        }
+    });
+}
+
+function predictCategory() {
+    document.getElementById('error-message').innerText = '';
+    var subjectElement = document.getElementById('inquiry-subject');
+    var inputTextElement = document.getElementById('code');
+    var spinner = document.getElementById('spinner');
+    var outputElement = document.getElementById('output');
+
+    var existingCategories = categories;  // Assuming 'categories' is the array holding your category names
+
+    var fullInputText = "Subject: " + subjectElement.value + "\n" +
+                        "Question: " + inputTextElement.value;
+
+    spinner.style.display = 'block';
+
+    $.ajax({
+        url: '/predict_category',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ 
+            text: fullInputText,
+            categories: existingCategories 
+        }),
+        success: function(data) {
+            console.log("Response data:", data); // Log entire response data
+            var predictedCategories = data.categories;
+            console.log("Predicted categories:", predictedCategories); // Log predicted categories
+
+            // Iterate over all predicted categories
+            predictedCategories.forEach(predictedCategory => {
+                var categoryId = predictedCategory.toLowerCase().replace(/\s+/g, '-') + '-checkbox';
+                console.log("Looking for checkbox with ID:", categoryId); // Log the ID being searched for
+                var checkbox = document.getElementById(categoryId);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    console.log("Checked:", categoryId); // Log if found and checked
+                } else {
+                    console.log("Checkbox not found for category:", predictedCategory); // Log if not found
+                }
+            });
+
+            outputElement.innerText = "Predicted Categories: " + predictedCategories.join(', ');
+        },
+        error: function(error) {
+            handleError(error);
+        },
+        complete: function() {
+            spinner.style.display = 'none';
+        }
+    });
+}
+
+function saveEditedCategory() {
+    const newCategoryName = document.getElementById('edit-category-name').value;
+    const newKBContent = document.getElementById('edit-kb-content').value;
+
+    // Check if the currentlyEditingCategory is set
+    if (!currentlyEditingCategory) {
+        alert('No category is currently being edited.');
+        return;
+    }
+
+    // Save the updated category name and knowledge base content
+    $.ajax({
+        url: '/save_category_and_kb',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ 
+            oldCategoryName: currentlyEditingCategory, 
+            newCategoryName: newCategoryName, 
+            kbContent: newKBContent 
+        }),
+        success: function(response) {
+            if(response.status === 'success') {
+                alert('Changes saved successfully.');
+            } else {
+                alert('Error: ' + response.message);
+            }
+            // Reset the currentlyEditingCategory
+            currentlyEditingCategory = '';
+
+            // Update UI accordingly
+            closeEditModal();
+            updateCategoryDisplay(); // Update your category display to reflect changes
+        },
+        error: function(xhr) {
+            alert('Error saving changes: ' + xhr.responseText);
+        }
+    });
+}
+
+
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+}
+
+function loadKBContent() {
+    var category = document.getElementById('category-select').value;
+
+    $.ajax({
+        url: '/get_kb_content',
+        type: 'GET',
+        data: { category: category },
+        success: function(response) {
+            if(response.status === 'success') {
+                document.getElementById('kb-entry').value = response.content;
+            } else {
+                alert('Error loading knowledge base content: ' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.log("AJAX Error:", xhr.responseText);
+            alert('Error loading knowledge base content: ' + xhr.responseText);
+        }
+    });
+}
+
+
+        let categories = [];
+
+function addCategory() {
+    const categoryName = document.getElementById('new-category-name').value.trim();
+    if (categoryName && !categories.includes(categoryName)) {
+        categories.push(categoryName);
+        updateCategoryDisplay();
+        saveCategories();
+    }
+}
+
+function updateCategoryDisplay() {
+    const categoriesContainer = document.getElementById('categories');
+    categoriesContainer.innerHTML = ''; // Clear existing categories
+
+    categories.forEach(category => {
+        categoriesContainer.innerHTML += createCategoryElement(category);
+    });
+}
+
+function getCheckedCategories() {
+    const checkedCategoryElements = document.querySelectorAll('#categories input[type="checkbox"]:checked');
+    const checkedCategories = Array.from(checkedCategoryElements).map(checkbox => checkbox.value);
+    console.log("Checked categories:", checkedCategories); // For debugging
+    return checkedCategories;
+}
+
+function createCategoryElement(categoryName) {
+    // This should match the ID generation in the editCategory function
+    const categoryId = "div-" + categoryName.toLowerCase().replace(/\s+/g, '-');
+    return `<div id="${categoryId}">
+                <input type="checkbox" id="${categoryId}-checkbox" name="category" value="${categoryName}">
+                <label for="${categoryId}-checkbox">${categoryName}</label>
+                <button onclick="editCategory('${categoryName}')">Edit</button>
+                <button onclick="deleteCategory('${categoryName}')">Delete</button>
+            </div>`;
+}
+
+
+function deleteCategory(categoryName) {
+    categories = categories.filter(category => category !== categoryName);
+    updateCategoryDisplay();
+    saveCategories();
+}
+var isEditModalOpen = false; 
+
+function editCategory(categoryName) {
+    console.log('Editing category:', categoryName);
+    if (isEditModalOpen) {
+        console.error('Another category is currently being edited.');
+        alert("Please finish editing the current category before editing another.");
+        return;
+    }
+
+    currentlyEditingCategory = categoryName;
+    if (!categoryName) {
+        console.error('Category name is undefined in editCategory function');
+        return;
+    }
+
+    isEditModalOpen = true;
+    var editModal = createEditModal(categoryName);
+    var categoryDivId = "div-" + categoryName.toLowerCase().replace(/\s+/g, '-');
+    console.log('Category div id:', categoryDivId);
+
+    var categoryDiv = document.getElementById(categoryDivId);
+    console.log('Category div:', categoryDiv);
+
+    if (categoryDiv) {
+        categoryDiv.after(editModal);
+    } else {
+        console.error('Category div not found for id:', categoryDivId);
+    }
+
+    loadKBContentForEdit(categoryName);
+}
+
+
+function createEditModal(categoryName) {
+    var modalDiv = document.createElement('div');
+    modalDiv.id = 'edit-modal';
+    modalDiv.innerHTML = `
+        <input type="text" id="edit-category-name" value="${categoryName}" />
+        <textarea id="edit-kb-content" rows="10" cols="50"></textarea><br>
+        <button onclick="saveEditedCategory()">Save Changes</button>
+        <button onclick="closeEditModal()">Cancel</button>
+    `;
+    console.log('Modal div:', modalDiv);
+    return modalDiv;
+}
+
+function closeEditModal() {
+    var editModal = document.getElementById('edit-modal');
+    if (editModal) {
+        editModal.remove();
+        isEditModalOpen = false;  // Reset the flag when the modal is closed
+    }
+}
+
+
+
+function loadKBContentForEdit(oldCategoryName, newCategoryName) {
+    // Using an Immediately-Invoked Function Expression (IIFE) to capture oldCategoryName and newCategoryName in the closure
+    (function(currentOldCategoryName, currentNewCategoryName) {
+        $.ajax({
+            url: '/get_kb_content',
+            type: 'GET',
+            data: { category: currentOldCategoryName },
+            success: function(response) {
+                if (response.status === 'success') {
+                    var editCategoryNameInput = document.getElementById('edit-category-name');
+                    var editKBContentTextarea = document.getElementById('edit-kb-content');
+                    if (editCategoryNameInput && editKBContentTextarea) {
+                        // If newCategoryName is provided, use it; otherwise, use oldCategoryName
+                        editCategoryNameInput.value = currentNewCategoryName ? currentNewCategoryName : currentOldCategoryName;
+                        editKBContentTextarea.value = response.content;
+
+                        // Show the edit modal
+                        var editModal = document.getElementById('edit-modal');
+                        if (editModal) {
+                            editModal.style.display = 'block';
+                        }
+                    } else {
+                        console.error('Edit elements not found');
+                    }
+                } else {
+                    alert('Error loading knowledge base content: ' + response.message);
+                }
+            },
+            error: function(xhr) {
+                alert('Error loading knowledge base content: ' + xhr.responseText);
+            }
+        });
+    })(oldCategoryName, newCategoryName);
+}
+
+
+function saveUpdatedKBContent(category, updatedContent) {
+    $.ajax({
+        url: '/save_kb_entry',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ category: category, entry: updatedContent }),
+        success: function(response) {
+            alert('Knowledge base content updated successfully.');
+        },
+        error: function() {
+            alert('Error saving updated knowledge base content.');
+        }
+    });
+}
+
+function updateCategoryDropdown() {
+    const categorySelect = document.getElementById('category-select');
+    categorySelect.innerHTML = ''; // Clear existing options
+
+    // Add each category as an option
+    categories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        categorySelect.appendChild(option);
+    });
+}
+
+function saveCategories() {
+    fetch('http://localhost:5000/saveCategories', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ categories: categories }),
+    })
+    .then(response => response.json())
+    .then(data => console.log(data.message))
+    .catch((error) => {
+        console.error('Error:', error);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('http://localhost:5000/getCategories')
+    .then(response => response.json())
+    .then(data => {
+        categories = data.categories;
+        updateCategoryDisplay();
+        updateCategoryDropdown(); // Initialize dropdown options
+    })
+    .catch((error) => {
+        console.error('Error:', error);
+    });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('http://localhost:5000/getCategories')
+    .then(response => response.json())
+    .then(data => {
+        console.log('Fetched categories:', data.categories);
+        if (data.categories) {
+            categories = data.categories;
+            updateCategoryDisplay(); // Create checkboxes for each category
+            updateCategoryDropdown(); // Update dropdown options
+        } else {
+            console.error('Categories not found in the response');
+        }
+    })
+    .catch((error) => {
+        console.error('Error fetching categories:', error);
+    });
+});
+
+
+function runPythonCode() {
+    var subjectElement = document.getElementById('inquiry-subject');
+    var generalInstructionsElement = document.getElementById('instructions');
+    var inputTextElement = document.getElementById('code');
+    var outputElement = document.getElementById('output');
+    var spinner = document.getElementById('spinner');
+
+    categories.forEach(category => {
+        // Simplified ID matching
+        const categoryId = category.replace(/\s+/g, '_');
+        const categoryCheckbox = document.getElementById(categoryId);
+        console.log(`Category: ${category}, Checkbox Element:`, categoryCheckbox); // This will log the actual element
+
+        if (categoryCheckbox && categoryCheckbox.checked) {
+            console.log(`Category ${category} is checked`);
+            // Proceed with adding this category's data
+        } else {
+            console.log(`Category ${category} is not checked or not found`);
+        }
+    });
+
+    // Start building the full input text
+    var fullInputText = "General Instructions: " + generalInstructionsElement.value + "\n" +
+                        "Subject: " + subjectElement.value + "\n" +
+                        "Question: " + inputTextElement.value + "\n";
+
+    // Function to send data to the LLM
+    var sendDataToLLM = function(fullText) {
+        // Clear the previous output and show the spinner
+        outputElement.innerText = '';
+        spinner.style.display = 'block';
+
+        $.ajax({
+            url: '/run_code',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ code: fullText }),
+            success: function(data) {
+                var response = data.result;
+                
+                outputElement.innerText = "Response: " + response;
+
+                document.getElementById('feedback-section').style.display = 'block'; // Show the feedback section
+
+                // Count the number of sentences in the response
+                var sentenceCount = response.match(/([^.!?]+[.!?]+)/g)?.length || 0;
+                document.getElementById('sentence-count').innerText = "Sentence count: " + sentenceCount;
+                document.getElementById('feedback-section').style.display = 'block';
+            },
+            error: function(error) {
+                outputElement.innerText = 'Error: ' + error.responseText;
+            },
+            complete: function() {
+                spinner.style.display = 'none';
+            }
+        });
+    };
+
+    // Append category-specific instructions
+    console.log("Initial categories:", categories);
+
+var promises = categories.map(category => {
+    return new Promise((resolve, reject) => {
+        const categoryId = category.toLowerCase().replace(/\s+/g, '-') + '-checkbox';
+        const categoryCheckbox = document.getElementById(categoryId);
+        console.log(`Checking category: ${category}, Checkbox ID: ${categoryId}, Is Checked: ${categoryCheckbox && categoryCheckbox.checked}`);
+
+        if (categoryCheckbox && categoryCheckbox.checked) {
+            loadCategoryInstructions(category, function(categoryInstructions) {
+                console.log(`Loaded instructions for ${category}:`, categoryInstructions);
+                resolve(category + " Use this content from NLM's knowledge base to inform your answer: " + categoryInstructions);
+            });
+        } else {
+            resolve('');
+        }
+    });
+});
+
+Promise.all(promises).then(categoryInstructions => {
+    categoryInstructions.forEach(instruction => {
+        if (instruction) {
+            fullInputText += instruction + "\n";
+        }
+    });
+    console.log("Final text to send to LLM:", fullInputText);
+    sendDataToLLM(fullInputText);
+});
+
+}
+
+
+
+
+function sendDataToLLM(fullInputText) {
+    $.ajax({
+        url: '/run_code',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ code: fullInputText }),
+        success: function(data) {
+            var response = data.result;
+
+            // Update the output element
+            var outputElement = document.getElementById('output');
+            if (outputElement) {
+                outputElement.innerText = "Response: " + response;
+            } else {
+                console.error("outputElement not found");
+            }
+
+            // Update the sentence count
+            var sentenceCountElement = document.getElementById('sentence-count');
+            if (sentenceCountElement) {
+                var sentenceCount = response.match(/([^.!?]+[.!?]+)/g)?.length || 0;
+                sentenceCountElement.innerText = "Sentence count: " + sentenceCount;
+            } else {
+                console.error("sentence-count element not found");
+            }
+
+            // Show the feedback section
+            var feedbackSection = document.getElementById('feedback-section');
+            if (feedbackSection) {
+                feedbackSection.style.display = 'block';
+            } else {
+                console.error("feedback-section not found");
+            }
+        },
+        error: function(error) {
+            var outputElement = document.getElementById('output');
+            if (outputElement) {
+                outputElement.innerText = 'Error: ' + error.responseText;
+            } else {
+                console.error("outputElement not found");
+            }
+        },
+        complete: function() {
+            var spinner = document.getElementById('spinner');
+            if (spinner) {
+                spinner.style.display = 'none';
+            } else {
+                console.error("spinner not found");
+            }
+        }
+    });
+}
+
+
+
+function loadCategoryInstructions(category, callback) {
+    $.ajax({
+        url: '/get_kb_content',
+        type: 'GET',
+        data: { category: category },
+        success: function(response) {
+            callback(response.content);
+        },
+        error: function() {
+            callback('');  // Proceed with empty content on error
+        }
+    });
+}
+
+function submitFeedback() {
+    // Retrieve values from the existing and new input fields
+    var subject = document.getElementById('inquiry-subject').value;
+    var inquiry = document.getElementById('code').value;
+    var response = document.getElementById('output').innerText.replace('Response: ', '');
+    var generalInstructions = document.getElementById('instructions').value;
+    var productSpecificInstructions = document.getElementById('kb-entry').value;
+    var usefulStatements = document.getElementById('correct-answer').value;
+    var missingUsefulStatements = document.getElementById('missing-useful-statements').value;
+    var incorrectStatements = document.getElementById('incorrect-statements').value;
+    var extraneousStatements = document.getElementById('extraneous-statements').value;
+    var notes = document.getElementById('notes').value;
+
+    // Construct data object to send
+    var data = {
+        timestamp: new Date().toISOString(),
+        subject: subject,
+        inquiry: inquiry,
+        response: response,
+        generalInstructions: generalInstructions,
+        productSpecificInstructions: productSpecificInstructions,
+        usefulStatements: parseInt(usefulStatements, 10),
+        missingUsefulStatements: parseInt(missingUsefulStatements, 10),
+        incorrectStatements: parseInt(incorrectStatements, 10),
+        extraneousStatements: parseInt(extraneousStatements, 10),
+        notes: notes
+    };
+
+    // AJAX request to send the feedback data
+    $.ajax({
+        url: '/save_feedback',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function() {
+            alert('Feedback saved successfully.');
+        },
+        error: function(xhr, status, error) {
+        console.log("Error:", xhr.responseText);
+        alert('Error saving feedback: ' + xhr.responseText);
+    }
+    });
+}
+
+
+
+
+
+
+    </script>
+    
+    
+</body>
+</html>
+
